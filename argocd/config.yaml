@@ -9,7 +9,7 @@ spec:
     server: 'https://kubernetes.default.svc'
   source:
     path: manifests
-    repoURL: 'https://github.com/Lucifergene/nodejs-knative-argocd'
+    repoURL: 'https://github.com/CIRCLECI-GWP/nodejs-knative-argocd'
     targetRevision: circleci-project-setup
   project: default
   syncPolicy:
