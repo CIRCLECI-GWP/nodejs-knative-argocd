@@ -1,0 +1,118 @@
+version: 2.1
+
+orbs:
+  docker: circleci/docker@2.1.1
+  azure-aks: circleci/azure-aks@0.3.0
+  kubernetes: circleci/kubernetes@1.3.0
+
+jobs:
+  argocd-manual-sync:
+    docker:
+      - image: cimg/base:stable
+    parameters:
+      server:
+        description: |
+          Server IP of of ArgoCD
+        type: string
+      username:
+        description: |
+          Username for ArgoCD
+        type: string
+      password:
+        description: |
+          Password for ArgoCD
+        type: string
+    steps:
+      - run:
+          name: Install ArgoCD CLI
+          command: |
+            URL=https://<< parameters.server >>/download/argocd-linux-amd64
+            [ -w /usr/local/bin ] && SUDO="" || SUDO=sudo
+            $SUDO curl --insecure -sSL -o /usr/local/bin/argocd $URL
+            $SUDO chmod +x /usr/local/bin/argocd
+      - run:
+          name: ArgoCD CLI login
+          command: argocd login << parameters.server >> --insecure --username << parameters.username >> --password << parameters.password >>
+      - run:
+          name: Manual sync
+          command: argocd app sync $APP_NAME
+      - run:
+          name: Wait for application to reach a synced and healthy state
+          command: argocd app wait $APP_NAME
+
+  argocd-configure:
+    docker:
+      - image: cimg/base:stable
+    parameters:
+      cluster-name:
+        description: |
+          Name of the AKS cluster
+        type: string
+      resource-group:
+        description: |
+          Resource group that the cluster is in
+        type: string
+    steps:
+      - checkout
+      - run:
+          name: Pull Updated code from repo
+          command: git pull origin $CIRCLE_BRANCH
+      - azure-aks/update-kubeconfig-with-credentials:
+          cluster-name: << parameters.cluster-name >>
+          install-kubectl: true
+          perform-login: true
+          resource-group: << parameters.resource-group >>
+      - kubernetes/create-or-update-resource:
+          resource-file-path: argocd/config.yaml
+
+  bump-docker-tag:
+    docker:
+      - image: cimg/base:stable
+    steps:
+      - run:
+          name: Install yq - portable yaml processor 
+          command: |
+            URL=https://github.com/mikefarah/yq/releases/download/3.3.4/yq_linux_amd64
+            [ -w /usr/local/bin ] && SUDO="" || SUDO=sudo
+            $SUDO wget $URL
+            $SUDO mv ./yq_linux_amd64 /usr/local/bin/yq
+            $SUDO chmod +x /usr/local/bin/yq
+      - checkout
+      - run:
+          name: Update Knative Service manifest
+          command: |
+            yq w -i knative/service.yaml spec.template.metadata.name "$APP_NAME-$CIRCLE_BUILD_NUM"
+            yq w -i knative/service.yaml spec.template.spec.containers[0].image "docker.io/$DOCKER_LOGIN/$APP_NAME:$CIRCLE_SHA1"
+      - add_ssh_keys:
+          fingerprints:
+            - "$SSH_FINGERPRINT"
+      - run:
+          name: Commit & Push to GitHub
+          command: |
+            git config user.email "$GITHUB_EMAIL"
+            git config user.name "CircleCI User"
+            git checkout $CIRCLE_BRANCH           
+            git commit -am "Bumps docker tag [skip ci]"
+            git push origin $CIRCLE_BRANCH
+
+workflows:
+  Deploy-App-on-AKS:
+    jobs:
+      - docker/publish:
+          image: $DOCKER_LOGIN/$APP_NAME
+          tag: $CIRCLE_SHA1,latest
+      - bump-docker-tag:
+          requires:
+            - docker/publish
+      - argocd-configure:
+          cluster-name: $CLUSTER_NAME
+          resource-group: $RESOURCE_GROUP
+          requires:
+            - bump-docker-tag
+# Paste the following only when you opt for the ArgoCD manual-sync-policy:
+      - argocd-manual-sync:
+          server: $ARGOCD_SERVER
+          username: $ARGOCD_USERNAME
+          password: $ARGOCD_PASSWORD
+          requires:
+            - argocd-configure       
