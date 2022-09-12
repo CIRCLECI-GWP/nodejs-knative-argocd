@@ -7,11 +7,11 @@ spec:
   template:
     metadata:
       creationTimestamp: null
-      name: nodejs-knative-argocd-28
+      name: nodejs-knative-argocd-33
     spec:
       containerConcurrency: 0
       containers:
-        - image: docker.io/yemiwebby/nodejs-knative-argocd:962953b803cefc70128d00bc5fc6a27ee46e52ae
+        - image: docker.io/yemiwebby/nodejs-knative-argocd:7a7d288aa566a8b398be4e495780004427251ac7
           name: user-container
           ports:
             - containerPort: 1337
